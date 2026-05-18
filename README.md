@@ -360,6 +360,10 @@ what the PostgreSQL trigger produces.
 
 ---
 
+Output:
+<img width="1919" height="1014" alt="Screenshot 2026-05-18 174649" src="https://github.com/user-attachments/assets/a8e95c4d-f141-48c8-a9e0-d0a7866d2e4c" />
+
+
 ## Notes
 
 - The `.env` file is intentionally excluded from version control. Never commit
