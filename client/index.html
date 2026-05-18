@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Orders — Realtime Dashboard</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
+
+<style>
+  /* ── Design tokens ─────────────────────────────────────────────────── */
+  :root {
+    --bg:          #0b0c10;
+    --surface:     #13151c;
+    --surface2:    #1c1f2b;
+    --border:      #272a36;
+    --accent:      #00e5ff;
+    --accent-dim:  #00e5ff22;
+    --warn:        #ff9f43;
+    --success:     #26de81;
+    --danger:      #ff6b6b;
+    --text:        #e8eaf0;
+    --muted:       #6b7080;
+    --font-ui:     'Syne', sans-serif;
+    --font-mono:   'Space Mono', monospace;
+    --radius:      8px;
+    --transition:  0.18s ease;
+  }
+
+  /* ── Reset / base ───────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 15px; background: var(--bg); color: var(--text); }
+  body {
+    font-family: var(--font-ui);
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-columns: 320px 1fr;
+    grid-template-areas:
+      "header  header"
+      "sidebar main"
+      "footer  footer";
+  }
+
+  /* ── Header ─────────────────────────────────────────────────────────── */
+  header {
+    grid-area: header;
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+    padding: 1rem 2rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  header h1 span { color: var(--accent); }
+
+  #ws-status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  #ws-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--danger);
+    transition: background var(--transition);
+    flex-shrink: 0;
+  }
+  #ws-dot.connected   { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  #ws-dot.connecting  { background: var(--warn);    animation: pulse 1s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+
+  /* ── Sidebar — create / event log ───────────────────────────────────── */
+  aside {
+    grid-area: sidebar;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    overflow: hidden;
+  }
+
+  .panel-title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+  }
+
+  /* Form */
+  .create-panel { flex-shrink: 0; }
+  .field        { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.85rem; }
+  .field label  { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  input, select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    padding: 0.5rem 0.75rem;
+    outline: none;
+    transition: border-color var(--transition);
+    width: 100%;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 0.6rem;
+    border: none;
+    border-radius: var(--radius);
+    font-family: var(--font-ui);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity var(--transition), transform var(--transition);
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary   { background: var(--accent); color: var(--bg); }
+  .btn-danger    { background: var(--danger); color: #fff; margin-top: 0.4rem; }
+  .btn:hover     { opacity: 0.88; }
+
+  /* Event log */
+  .log-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #event-log {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-right: 0.25rem;
+  }
+  #event-log::-webkit-scrollbar       { width: 4px; }
+  #event-log::-webkit-scrollbar-track { background: transparent; }
+  #event-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .log-entry {
+    background: var(--surface2);
+    border-left: 3px solid var(--border);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 0.5rem 0.65rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    line-height: 1.5;
+    animation: slideIn 0.22s ease;
+  }
+  .log-entry.INSERT { border-left-color: var(--success); }
+  .log-entry.UPDATE { border-left-color: var(--accent);  }
+  .log-entry.DELETE { border-left-color: var(--danger);  }
+
+  .log-op   { font-weight: 700; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; }
+  .log-meta { color: var(--muted); }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  /* ── Main — orders table ─────────────────────────────────────────────── */
+  main {
+    grid-area: main;
+    padding: 1.5rem 2rem;
+    overflow-y: auto;
+  }
+  .main-header {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+  .main-header h2 { font-size: 1.05rem; font-weight: 800; }
+  #order-count {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+  thead th {
+    padding: 0.6rem 0.9rem;
+    text-align: left;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background var(--transition);
+  }
+  tbody tr:hover      { background: var(--surface2); }
+  tbody tr.flash-new  { animation: flashNew 1.2s ease; }
+  tbody tr.flash-upd  { animation: flashUpd 1.2s ease; }
+  tbody tr.flash-del  { animation: flashDel 0.6s ease forwards; }
+
+  @keyframes flashNew {
+    0%   { background: #26de8122; }
+    100% { background: transparent; }
+  }
+  @keyframes flashUpd {
+    0%   { background: #00e5ff18; }
+    100% { background: transparent; }
+  }
+  @keyframes flashDel {
+    0%   { opacity: 1; }
+    100% { opacity: 0; height: 0; padding: 0; }
+  }
+
+  tbody td {
+    padding: 0.65rem 0.9rem;
+    vertical-align: middle;
+  }
+  .id-cell { font-family: var(--font-mono); color: var(--muted); font-size: 0.75rem; }
+
+  /* Status badge */
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .badge-pending   { background: #ff9f4322; color: var(--warn); border: 1px solid #ff9f4344; }
+  .badge-shipped   { background: #00e5ff22; color: var(--accent); border: 1px solid #00e5ff44; }
+  .badge-delivered { background: #26de8122; color: var(--success); border: 1px solid #26de8144; }
+
+  .ts-cell { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); }
+
+  /* Action buttons */
+  .actions { display: flex; gap: 0.4rem; }
+  .act-btn {
+    padding: 0.25rem 0.55rem;
+    border-radius: 5px;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: opacity var(--transition);
+  }
+  .act-btn:hover { opacity: 0.75; }
+  .act-ship  { background: var(--accent-dim); color: var(--accent); border-color: #00e5ff44; }
+  .act-deliv { background: #26de8122; color: var(--success); border-color: #26de8144; }
+  .act-del   { background: #ff6b6b22; color: var(--danger); border-color: #ff6b6b44; }
+
+  /* Empty state */
+  #empty-state {
+    text-align: center;
+    padding: 3rem 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    display: none;
+  }
+
+  /* ── Footer ─────────────────────────────────────────────────────────── */
+  footer {
+    grid-area: footer;
+    padding: 0.6rem 2rem;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--muted);
+    display: flex;
+    gap: 2rem;
+  }
+  footer span { display: flex; align-items: center; gap: 0.35rem; }
+
+  /* ── Responsive ──────────────────────────────────────────────────────── */
+  @media (max-width: 800px) {
+    body {
+      grid-template-columns: 1fr;
+      grid-template-areas: "header" "main" "sidebar" "footer";
+    }
+    aside { border-right: none; border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ Header ═══════════════════════════════════════════════════════════ -->
+<header>
+  <h1>Orders <span>//</span> Realtime</h1>
+  <div id="ws-status">
+    <div id="ws-dot" class="connecting"></div>
+    <span id="ws-label">connecting…</span>
+  </div>
+</header>
+
+<!-- ═══ Sidebar ══════════════════════════════════════════════════════════ -->
+<aside>
+
+  <!-- Create form -->
+  <div class="create-panel">
+    <p class="panel-title">New Order</p>
+    <div class="field">
+      <label>Customer</label>
+      <input id="f-customer" type="text" placeholder="Alice Smith" />
+    </div>
+    <div class="field">
+      <label>Product</label>
+      <input id="f-product" type="text" placeholder="Mechanical Keyboard" />
+    </div>
+    <div class="field">
+      <label>Status</label>
+      <select id="f-status">
+        <option value="pending">pending</option>
+        <option value="shipped">shipped</option>
+        <option value="delivered">delivered</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" onclick="createOrder()">＋ Create Order</button>
+  </div>
+
+  <!-- Live event log -->
+  <div class="log-panel">
+    <p class="panel-title">Live Events</p>
+    <div id="event-log">
+      <div class="log-entry" style="border-color:var(--muted); color:var(--muted);">
+        <span class="log-meta">Waiting for events…</span>
+      </div>
+    </div>
+  </div>
+
+</aside>
+
+<!-- ═══ Main ══════════════════════════════════════════════════════════════ -->
+<main>
+  <div class="main-header">
+    <h2>Orders</h2>
+    <span id="order-count">— rows</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Customer</th>
+        <th>Product</th>
+        <th>Status</th>
+        <th>Updated</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="orders-body">
+    </tbody>
+  </table>
+
+  <div id="empty-state">No orders yet — create one →</div>
+</main>
+
+<!-- ═══ Footer ════════════════════════════════════════════════════════════ -->
+<footer>
+  <span>🔌 Transport: WebSocket (LISTEN/NOTIFY)</span>
+  <span id="msg-counter">📨 Messages: 0</span>
+  <span id="client-ts">🕐 —</span>
+</footer>
+
+
+<!-- ═══ Script ════════════════════════════════════════════════════════════ -->
+<script>
+  // ── Config ─────────────────────────────────────────────────────────────
+  const API_BASE = "http://localhost:8000";
+  const WS_URL   = "ws://localhost:8000/ws/orders";
+
+  // ── State ───────────────────────────────────────────────────────────────
+  let msgCount = 0;
+  let ws;
+
+  // ── Boot ────────────────────────────────────────────────────────────────
+  document.addEventListener("DOMContentLoaded", () => {
+    fetchOrders();
+    connectWS();
+    setInterval(updateClock, 1000);
+    updateClock();
+  });
+
+  // ── REST helpers ─────────────────────────────────────────────────────────
+
+  async function fetchOrders() {
+    const res  = await fetch(`${API_BASE}/orders`);
+    const rows = await res.json();
+    renderTable(rows);
+  }
+
+  async function createOrder() {
+    const customer = document.getElementById("f-customer").value.trim();
+    const product  = document.getElementById("f-product").value.trim();
+    const status   = document.getElementById("f-status").value;
+    if (!customer || !product) { alert("Please fill in customer and product."); return; }
+
+    await fetch(`${API_BASE}/orders`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ customer_name: customer, product_name: product, status }),
+    });
+
+    // Clear inputs
+    document.getElementById("f-customer").value = "";
+    document.getElementById("f-product").value  = "";
+  }
+
+  async function shipOrder(id) {
+    await fetch(`${API_BASE}/orders/${id}`, {
+      method:  "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ status: "shipped" }),
+    });
+  }
+
+  async function deliverOrder(id) {
+    await fetch(`${API_BASE}/orders/${id}`, {
+      method:  "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ status: "delivered" }),
+    });
+  }
+
+  async function deleteOrder(id) {
+    if (!confirm(`Delete order #${id}?`)) return;
+    await fetch(`${API_BASE}/orders/${id}`, { method: "DELETE" });
+  }
+
+  // ── Table rendering ───────────────────────────────────────────────────────
+
+  function renderTable(rows) {
+    const tbody = document.getElementById("orders-body");
+    tbody.innerHTML = "";
+
+    rows.forEach(r => tbody.appendChild(buildRow(r)));
+
+    document.getElementById("order-count").textContent = `${rows.length} row${rows.length !== 1 ? "s" : ""}`;
+    document.getElementById("empty-state").style.display = rows.length ? "none" : "block";
+  }
+
+  function buildRow(r) {
+    const tr = document.createElement("tr");
+    tr.id = `row-${r.id}`;
+    tr.innerHTML = `
+      <td class="id-cell">#${r.id}</td>
+      <td>${escHtml(r.customer_name)}</td>
+      <td>${escHtml(r.product_name)}</td>
+      <td><span class="badge badge-${r.status}">${r.status}</span></td>
+      <td class="ts-cell">${fmtDate(r.updated_at)}</td>
+      <td>
+        <div class="actions">
+          <button class="act-btn act-ship"  onclick="shipOrder(${r.id})"    title="Mark shipped">ship</button>
+          <button class="act-btn act-deliv" onclick="deliverOrder(${r.id})" title="Mark delivered">deliver</button>
+          <button class="act-btn act-del"   onclick="deleteOrder(${r.id})"  title="Delete">del</button>
+        </div>
+      </td>`;
+    return tr;
+  }
+
+  // ── WebSocket ──────────────────────────────────────────────────────────────
+
+  function connectWS() {
+    setWsStatus("connecting");
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      setWsStatus("connected");
+      logEvent({ operation: "SYSTEM", record: { id: "—" }, timestamp: new Date().toISOString(), _msg: "WebSocket connected" });
+    };
+
+    ws.onmessage = ({ data }) => {
+      const evt = JSON.parse(data);
+      handleDBEvent(evt);
+    };
+
+    ws.onclose = () => {
+      setWsStatus("disconnected");
+      logEvent({ operation: "SYSTEM", record: { id: "—" }, timestamp: new Date().toISOString(), _msg: "Disconnected — reconnecting in 3 s" });
+      setTimeout(connectWS, 3000);
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  function handleDBEvent(evt) {
+    msgCount++;
+    document.getElementById("msg-counter").textContent = `📨 Messages: ${msgCount}`;
+
+    logEvent(evt);
+
+    const op = evt.operation;
+    const r  = evt.record;
+
+    if (op === "INSERT") {
+      const tbody = document.getElementById("orders-body");
+      const newRow = buildRow(r);
+      newRow.classList.add("flash-new");
+      tbody.prepend(newRow);
+      updateCount(1);
+    } else if (op === "UPDATE") {
+      const existing = document.getElementById(`row-${r.id}`);
+      if (existing) {
+        const updated = buildRow(r);
+        updated.classList.add("flash-upd");
+        existing.replaceWith(updated);
+      }
+    } else if (op === "DELETE") {
+      const existing = document.getElementById(`row-${r.id}`);
+      if (existing) {
+        existing.classList.add("flash-del");
+        setTimeout(() => existing.remove(), 600);
+        updateCount(-1);
+      }
+    }
+  }
+
+  // ── Event log ─────────────────────────────────────────────────────────────
+
+  function logEvent(evt) {
+    const log   = document.getElementById("event-log");
+    const entry = document.createElement("div");
+    const op    = evt.operation || "?";
+    const r     = evt.record || {};
+    const ts    = evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : "—";
+
+    entry.className = `log-entry ${op}`;
+    entry.innerHTML = `
+      <div><span class="log-op">${op}</span></div>
+      <div class="log-meta">
+        ${evt._msg ? evt._msg : `id=${r.id}  ${r.customer_name || ""}  ${r.status || ""}`}
+      </div>
+      <div class="log-meta">${ts}</div>`;
+
+    // Remove the placeholder if it's still there
+    const placeholder = log.querySelector(".log-entry:not([class*='INSERT']):not([class*='UPDATE']):not([class*='DELETE'])");
+    if (placeholder && placeholder.textContent.includes("Waiting")) placeholder.remove();
+
+    log.prepend(entry);
+
+    // Keep log to 50 entries
+    while (log.children.length > 50) log.removeChild(log.lastChild);
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  function setWsStatus(state) {
+    const dot   = document.getElementById("ws-dot");
+    const label = document.getElementById("ws-label");
+    dot.className = `${state}`;  // reset then apply
+    label.textContent = state;
+  }
+
+  function updateCount(delta) {
+    const el  = document.getElementById("order-count");
+    const cur = parseInt(el.textContent) || 0;
+    const n   = Math.max(0, cur + delta);
+    el.textContent = `${n} row${n !== 1 ? "s" : ""}`;
+    document.getElementById("empty-state").style.display = n ? "none" : "block";
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function escHtml(str) {
+    return String(str).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+
+  function updateClock() {
+    document.getElementById("client-ts").textContent = "🕐 " + new Date().toLocaleTimeString();
+  }
+</script>
+
+</body>
+</html>
